@@ -1,0 +1,152 @@
+           Static malware detection with deep autoencoder: WannaCry as a test
+=============================================================================================
+
+
+These days our cyberspace is having various troubles with malwares
+
+Antivirus(s) have been doing good job detecting malicious software for decades. Although, most of this dudes, or let's say the traditional ones, are signature based which means that the malware signature (or hash, or whatever..) needs to be stored somewhere in a database to be detectable. The big issue with this is that we don't have any real guarantee that the antivirus will detect an entirely unknown malware which the signature hasn't yet been added to any database, especially if the concerned malware is well obfuscated.
+
+->      using Microsoft Big 2015 dataset 
+
+    This dataset was initially published in the context of a machine learning challenge organised by Microsoft. It contains assembly code of malwares
+
+
+->      The idea is to train a model able to reconstruct a malware as perfect as possible
+
+
+
+
+1) 
+
+     The idea is to train a model able to reconstruct a malware as perfect as possible.
+        
+     Once the reconstruction model is available, an extra layer will be needed to make the malware detection. 
+
+        -> This layer consists of calculating the error between the input (the binary we want to check) and the output (the reconstructed binary), 
+        -> and since our model will be trained with only malicious binaries it will not be good in reconstructing non malicious executables.
+
+        -> This means that we will expect high error rate for non malware binaries and low error rate for malwares. [[
+
+            this is our malware classification criteria
+        ]]
+ 
+        -> The last steps is to find the error threshold under it a binary will be considered as malware, once this is done we can say that we have modern antivirus which could be used to detect actual malicious softwares
+
+
+  ------------------------------------------------------------------------------------------------------------
+
+  2) The solution to implement the described strategy is an autoencoder neural network.
+  
+   Autoencoder is a "special" architecture of a neural network which makes reconstructing inputs possible
+
+    -> we will be using the count of the most used assembly instructions as the features
+
+
+  3) Feature Extraction
+
+
+        -> The following is an example of an assembly file retrieved from Microsoft malware database. At it's raw format this file is useless from model training point of view.
+
+
+
+        -> To generate the final data we will use to train the autoencoder we will need to parse all the disassembled malware files and count the number of each instruction
+
+
+
+        -> This is done using the script gen_features.py you will find in the code source. 
+
+
+        -> The script will generate a CSV file where every assembly operation is presented by a column and every malware is presented by a row. We totally have 17 features and our ready to use data looks like the following.
+
+4) Autoencoder architecture
+
+        -> As we said, an autoencoder will be used. This neural network has as number of outputs the same number of inputs because we will train it the learn the function f(X) = X.
+
+
+        -> The best architecture that worked for me consists of 13 hidden layers. The 7 first ones contains 17,15, 13, 11, 9, 7, 5, 3 nodes and last 6 ones contains 5, 7, 9, 11, 13,15 and 17 nodes. The inputs and output layers includes the numbers of features (18 assembly instructions) as nodes. It looks visually like the following
+
+
+5) Training phase
+
+
+        -> Keras is used for the neural network implementation.
+
+        -> the training code need to be compiled and trained
+
+        -> 10 epochs were enough to get a respectable result, the used batch size is 18. 
+        
+        -> One important detail to mention is that we have X (features) as training destination which is not very usual and could be confusing in a traditional neural network but totally normal in an autoencoder. 
+        
+        -> The model saved in model.h5 file is our future modern antivirus!
+
+6) Testing data
+
+        -> In order to test if our model is really detecting malware we need some negative data (non malware binaries). The best solution I found to get this is retrieving binaries from my own linux machine and disassemble them to finally generate features like we did with malicious files. To get all the binaries in my computer and disassemble them I used find command combined with objdump as the following:
+
+            $ find / -perm +111 -type f -exec sh disassemble.sh {} \;
+
+
+            Here is the content of disassemble.sh
+
+                filename=$(basename $1)
+                objdump $1 -d -x86-asm-syntax intel > ./benign_dataset/$filename.asm
+
+
+
+            -> The option -x86-asm-syntax is set to intel because the malicious dataset uses this flavour and we want both dataset to be similar in term of syntax, especially the instructions names.
+
+            -> At this stage we can run the script gen_data.py to get a CSV like the one we get for malicious data.
+
+            -> We will also need some malicious testing data that will be taken from the initial malicious data we generated in the beginning.
+
+
+7 ) detection
+
+            -> As our model is trained to reconstruct malware binaries, it will not be good in reconstructing non malicious ones. 
+            
+            -> This will technically be translated by a high reconstruction error rate for non malicious binaries and a low one for malwares. 
+            
+            -> Thus, We will need to find a threshold, consider as non malicious the binaries with an error rate exceeding it, and as malicious the ones with an error rate below or equal to it.
+
+            
+            -> In order to implement this logic we will first need to make prediction for both malicious and non malicious testing data with the autoencoder we trained.
+
+
+                        predictions_malicous = autoencoder.predict(X_test_malicious)
+                        predictions_non_malicous = autoencoder.predict(X_test_non_malicious)
+
+
+            -> Error calculation is done using mean square error as the following:
+
+                        mse_malicious = np.mean(np.power(X_test_malicious - predictions_malicous, 2), axis=1)
+                        mse_non_malicious = np.mean(np.power(X_test_malicious - predictions_non_malicous, 2), axis=1)
+
+            -> At this stage we can define a threshold. We can define any threshold and optimise it later, but the one that worked the best for me is the average of malicious binaries reconstruction error.
+
+                        threshold = np.average(mse_malicious)
+
+            -> At this stage we can calculate the performances and visualise the results. Performances metrics could be calculated as the following:
+
+                        tp, fp, tn, fn = 0, 0, 0, 0
+                        for e in predictions_malicous:
+                            if e < threshold:
+                                tp+=1
+                            else:
+                                fn+=1
+                        for e in mse_def_test:
+                            if e>=threshold:
+                                tn+=1
+                            else:
+                                fp+=1
+
+        The result is:
+
+            Accuracy: 0.70
+            Recall: 0.92
+            Precision: 0.67
+
+
+            -> The result is not bad except the fact that we are generating relatively a lot of false positives. This still could be solved by fine tuning the threshold.
+
+The following are the results visualisation. The black points represent the malware binaries and the green ones represent normal software.
+
